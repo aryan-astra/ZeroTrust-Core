@@ -21,6 +21,7 @@ import string
 import asyncio
 import argparse
 import requests
+import numpy as np
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -28,6 +29,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import settings
 
 API_BASE = f"http://localhost:{settings.SERVER_PORT}"
+
+# ---- Load real training data for feature sampling ----
+_attack_samples = None
+_normal_samples = None
+_feature_cols = None
+
+def _load_feature_samples():
+    """Load and cache real attack/normal feature samples from the processed dataset."""
+    global _attack_samples, _normal_samples, _feature_cols
+    if _feature_cols is not None:
+        return
+    try:
+        import joblib
+        import pandas as pd
+        scaler = joblib.load(os.path.join(settings.PROCESSED_DIR, "network_scaler.pkl"))
+        _feature_cols = joblib.load(os.path.join(settings.PROCESSED_DIR, "network_feature_columns.pkl"))
+        mixed = pd.read_csv(os.path.join(settings.PROCESSED_DIR, "network_mixed.csv"))
+        attacks = mixed[mixed["label"] == 1][_feature_cols].values
+        normals = mixed[mixed["label"] == 0][_feature_cols].values
+        _attack_samples = scaler.inverse_transform(attacks)
+        _normal_samples = scaler.inverse_transform(normals)
+    except Exception as e:
+        print(f"  [!] Could not load feature samples: {e}. Using fallback values.")
+        _attack_samples = None
+        _normal_samples = None
+        _feature_cols = []
+
+_load_feature_samples()
 
 # Device pools
 HOSTNAMES = [
@@ -80,84 +109,255 @@ def _random_hostname():
 
 
 def _normal_network_features():
-    """Generate benign network traffic features."""
+    """Sample a real normal traffic row from the CICIDS-2017 processed training data."""
+    if _normal_samples is not None and len(_normal_samples) > 0:
+        row = _normal_samples[random.randint(0, len(_normal_samples) - 1)]
+        return {col: float(row[i]) for i, col in enumerate(_feature_cols)}
+    # Fallback: minimal synthetic dict if data could not be loaded
+    fwd_pkt_mean = random.uniform(200, 1400)
+    bwd_pkt_mean = random.uniform(100, 1200)
+    pkt_mean = (fwd_pkt_mean + bwd_pkt_mean) / 2
+    pkt_std = random.uniform(10, 300)
+    flow_dur = random.uniform(5000, 2000000)       # microseconds
+    fwd_pkts = random.randint(2, 25)
+    bwd_pkts = random.randint(1, 20)
+    iat_mean = flow_dur / max(fwd_pkts + bwd_pkts, 1)
+    fwd_iat_mean = random.uniform(500, 80000)
+    bwd_iat_mean = random.uniform(500, 80000)
     return {
-        "Flow Duration": random.uniform(100, 50000),
-        "Total Fwd Packets": random.randint(1, 20),
-        "Total Backward Packets": random.randint(1, 15),
-        "Flow Bytes/s": random.uniform(100, 50000),
-        "Flow Packets/s": random.uniform(1, 100),
-        "Fwd Packet Length Mean": random.uniform(40, 1500),
-        "Bwd Packet Length Mean": random.uniform(40, 1200),
-        "Flow IAT Mean": random.uniform(1000, 100000),
-        "Fwd IAT Mean": random.uniform(500, 50000),
-        "Bwd IAT Mean": random.uniform(500, 50000),
-        "SYN Flag Count": random.randint(0, 2),
-        "RST Flag Count": 0,
-        "PSH Flag Count": random.randint(0, 3),
-        "ACK Flag Count": random.randint(1, 10),
-        "Fwd Header Length": random.uniform(20, 60),
-        "Bwd Header Length": random.uniform(20, 60),
-        "Packet Length Variance": random.uniform(10, 500),
-        "Average Packet Size": random.uniform(60, 800),
-        "Init_Win_bytes_forward": random.randint(1024, 65535),
-        "Init_Win_bytes_backward": random.randint(1024, 65535),
+        "Destination Port":          random.choice([80, 443, 8080, 53, 22, 25, 110, 143]),
+        "Flow Duration":             flow_dur,
+        "Total Fwd Packets":         fwd_pkts,
+        "Total Length of Fwd Packets": fwd_pkts * fwd_pkt_mean,
+        "Fwd Packet Length Max":     fwd_pkt_mean + random.uniform(0, 200),
+        "Fwd Packet Length Min":     max(20, fwd_pkt_mean - random.uniform(0, 150)),
+        "Fwd Packet Length Mean":    fwd_pkt_mean,
+        "Fwd Packet Length Std":     random.uniform(5, 200),
+        "Bwd Packet Length Max":     bwd_pkt_mean + random.uniform(0, 200),
+        "Bwd Packet Length Min":     max(20, bwd_pkt_mean - random.uniform(0, 150)),
+        "Bwd Packet Length Mean":    bwd_pkt_mean,
+        "Bwd Packet Length Std":     random.uniform(5, 200),
+        "Flow Bytes/s":              random.uniform(500, 80000),
+        "Flow Packets/s":            random.uniform(1, 150),
+        "Flow IAT Mean":             iat_mean,
+        "Flow IAT Std":              iat_mean * random.uniform(0.1, 0.8),
+        "Flow IAT Max":              iat_mean * random.uniform(1.5, 5),
+        "Flow IAT Min":              random.uniform(10, 500),
+        "Fwd IAT Total":             fwd_iat_mean * fwd_pkts,
+        "Fwd IAT Mean":              fwd_iat_mean,
+        "Fwd IAT Std":               fwd_iat_mean * random.uniform(0.1, 0.5),
+        "Fwd IAT Max":               fwd_iat_mean * random.uniform(1.5, 4),
+        "Fwd IAT Min":               random.uniform(10, 300),
+        "Bwd IAT Total":             bwd_iat_mean * bwd_pkts,
+        "Bwd IAT Mean":              bwd_iat_mean,
+        "Bwd IAT Std":               bwd_iat_mean * random.uniform(0.1, 0.5),
+        "Bwd IAT Max":               bwd_iat_mean * random.uniform(1.5, 4),
+        "Bwd IAT Min":               random.uniform(10, 300),
+        "Fwd Header Length":         random.uniform(20, 60),
+        "Bwd Header Length":         random.uniform(20, 60),
+        "Fwd Packets/s":             fwd_pkts / (flow_dur / 1e6 + 1e-9),
+        "Bwd Packets/s":             bwd_pkts / (flow_dur / 1e6 + 1e-9),
+        "Min Packet Length":         random.uniform(20, 100),
+        "Max Packet Length":         pkt_mean + random.uniform(100, 600),
+        "Packet Length Mean":        pkt_mean,
+        "Packet Length Std":         pkt_std,
+        "Packet Length Variance":    pkt_std ** 2,
+        "FIN Flag Count":            random.randint(0, 1),
+        "PSH Flag Count":            random.randint(0, 4),
+        "ACK Flag Count":            random.randint(1, 12),
+        "Average Packet Size":       pkt_mean,
+        "Subflow Fwd Bytes":         fwd_pkts * fwd_pkt_mean,
+        "Init_Win_bytes_forward":    random.randint(8192, 65535),
+        "Init_Win_bytes_backward":   random.randint(8192, 65535),
+        "act_data_pkt_fwd":          random.randint(1, fwd_pkts),
+        "min_seg_size_forward":      random.randint(20, 32),
+        "Active Mean":               random.uniform(0, 500000),
+        "Active Max":                random.uniform(100000, 1000000),
+        "Active Min":                random.uniform(0, 100000),
+        "Idle Mean":                 random.uniform(0, 2000000),
+        "Idle Max":                  random.uniform(500000, 5000000),
+        "Idle Min":                  random.uniform(0, 500000),
     }
 
 
 def _attack_network_features(attack_type):
-    """Generate attack-pattern network features."""
+    """Sample a real attack traffic row from the CICIDS-2017 processed training data."""
+    if _attack_samples is not None and len(_attack_samples) > 0:
+        row = _attack_samples[random.randint(0, len(_attack_samples) - 1)]
+        return {col: float(row[i]) for i, col in enumerate(_feature_cols)}
+    # Fallback: synthetic values if data could not be loaded
     base = _normal_network_features()
 
     if attack_type == "ddos":
+        fwd_pkts = random.randint(1000, 50000)
+        pkt_size = random.uniform(40, 80)
+        flow_dur = random.uniform(100, 2000)
         base.update({
-            "Flow Duration": random.uniform(1, 100),
-            "Total Fwd Packets": random.randint(500, 50000),
-            "Flow Bytes/s": random.uniform(500000, 5000000),
-            "Flow Packets/s": random.uniform(5000, 100000),
-            "SYN Flag Count": random.randint(100, 1000),
-            "RST Flag Count": random.randint(50, 500),
-            "Packet Length Variance": random.uniform(0, 10),
-            "Average Packet Size": random.uniform(40, 80),
+            "Destination Port":            random.choice([80, 443, 53]),
+            "Flow Duration":               flow_dur,
+            "Total Fwd Packets":           fwd_pkts,
+            "Total Length of Fwd Packets": fwd_pkts * pkt_size,
+            "Fwd Packet Length Max":       pkt_size + 4,
+            "Fwd Packet Length Min":       pkt_size - 4,
+            "Fwd Packet Length Mean":      pkt_size,
+            "Fwd Packet Length Std":       random.uniform(0, 5),
+            "Flow Bytes/s":                random.uniform(2000000, 15000000),
+            "Flow Packets/s":              random.uniform(10000, 200000),
+            "Fwd Packets/s":              fwd_pkts / (flow_dur / 1e6 + 1e-9),
+            "Bwd Packets/s":              0,
+            "Min Packet Length":           40,
+            "Max Packet Length":           pkt_size + 10,
+            "Packet Length Mean":          pkt_size,
+            "Packet Length Std":           random.uniform(0, 5),
+            "Packet Length Variance":      random.uniform(0, 25),
+            "Average Packet Size":         pkt_size,
+            "Subflow Fwd Bytes":           fwd_pkts * pkt_size,
+            "FIN Flag Count":              0,
+            "PSH Flag Count":              0,
+            "ACK Flag Count":              0,
+            "Init_Win_bytes_forward":      random.randint(1024, 4096),
+            "Init_Win_bytes_backward":     0,
+            "act_data_pkt_fwd":            fwd_pkts,
+            "Flow IAT Mean":               flow_dur / max(fwd_pkts, 1),
+            "Flow IAT Std":                1,
+            "Flow IAT Max":                10,
+            "Flow IAT Min":                0,
+            "Idle Mean":                   0,
+            "Idle Max":                    0,
+            "Idle Min":                    0,
         })
     elif attack_type == "brute_force":
+        fwd_pkts = random.randint(60, 300)
+        bwd_pkts = random.randint(60, 300)
+        pkt_size = random.uniform(40, 100)
+        flow_dur = random.uniform(100000, 5000000)
         base.update({
-            "Flow Duration": random.uniform(10, 1000),
-            "Total Fwd Packets": random.randint(50, 200),
-            "Total Backward Packets": random.randint(50, 200),
-            "Flow Bytes/s": random.uniform(10000, 100000),
-            "SYN Flag Count": random.randint(20, 100),
-            "RST Flag Count": random.randint(10, 50),
-            "Fwd Packet Length Mean": random.uniform(40, 100),
-            "Bwd Packet Length Mean": random.uniform(40, 100),
+            "Destination Port":            random.choice([22, 3389, 21, 23, 445]),
+            "Flow Duration":               flow_dur,
+            "Total Fwd Packets":           fwd_pkts,
+            "Total Length of Fwd Packets": fwd_pkts * pkt_size,
+            "Fwd Packet Length Mean":      pkt_size,
+            "Fwd Packet Length Max":       pkt_size + 20,
+            "Fwd Packet Length Min":       pkt_size - 10,
+            "Fwd Packet Length Std":       random.uniform(2, 15),
+            "Bwd Packet Length Mean":      pkt_size,
+            "Bwd Packet Length Max":       pkt_size + 20,
+            "Bwd Packet Length Min":       pkt_size - 10,
+            "Bwd Packet Length Std":       random.uniform(2, 15),
+            "Flow Bytes/s":                random.uniform(5000, 80000),
+            "Flow Packets/s":              random.uniform(100, 2000),
+            "Fwd Packets/s":              fwd_pkts / (flow_dur / 1e6 + 1e-9),
+            "Bwd Packets/s":              bwd_pkts / (flow_dur / 1e6 + 1e-9),
+            "Min Packet Length":           30,
+            "Max Packet Length":           pkt_size + 30,
+            "Packet Length Mean":          pkt_size,
+            "Packet Length Std":           random.uniform(2, 20),
+            "Packet Length Variance":      random.uniform(4, 400),
+            "Average Packet Size":         pkt_size,
+            "Subflow Fwd Bytes":           fwd_pkts * pkt_size,
+            "FIN Flag Count":              random.randint(10, 50),
+            "PSH Flag Count":              random.randint(0, 5),
+            "ACK Flag Count":              random.randint(60, 300),
+            "Init_Win_bytes_forward":      random.randint(8192, 65535),
+            "Init_Win_bytes_backward":     random.randint(8192, 65535),
+            "act_data_pkt_fwd":            random.randint(30, fwd_pkts),
         })
     elif attack_type == "web_attack":
+        fwd_pkts = random.randint(10, 80)
+        pkt_size = random.uniform(800, 5000)
+        flow_dur = random.uniform(50000, 500000)
         base.update({
-            "Total Fwd Packets": random.randint(10, 100),
-            "Fwd Packet Length Mean": random.uniform(500, 5000),
-            "Flow Bytes/s": random.uniform(50000, 500000),
-            "PSH Flag Count": random.randint(5, 30),
-            "Packet Length Variance": random.uniform(1000, 10000),
+            "Destination Port":            random.choice([80, 443, 8080, 8443]),
+            "Flow Duration":               flow_dur,
+            "Total Fwd Packets":           fwd_pkts,
+            "Total Length of Fwd Packets": fwd_pkts * pkt_size,
+            "Fwd Packet Length Mean":      pkt_size,
+            "Fwd Packet Length Max":       pkt_size + random.uniform(200, 1000),
+            "Fwd Packet Length Min":       random.uniform(40, 100),
+            "Fwd Packet Length Std":       random.uniform(200, 1000),
+            "Flow Bytes/s":                random.uniform(80000, 800000),
+            "Flow Packets/s":              random.uniform(50, 1000),
+            "Min Packet Length":           40,
+            "Max Packet Length":           pkt_size + 1000,
+            "Packet Length Mean":          pkt_size,
+            "Packet Length Std":           random.uniform(200, 1500),
+            "Packet Length Variance":      random.uniform(40000, 2000000),
+            "Average Packet Size":         pkt_size,
+            "Subflow Fwd Bytes":           fwd_pkts * pkt_size,
+            "PSH Flag Count":              random.randint(8, 40),
+            "ACK Flag Count":              random.randint(10, 80),
+            "FIN Flag Count":              random.randint(0, 5),
         })
     elif attack_type == "data_exfiltration":
+        fwd_pkts = random.randint(200, 800)
+        pkt_size = random.uniform(1200, 1500)
+        flow_dur = random.uniform(60000000, 300000000)
         base.update({
-            "Flow Duration": random.uniform(60000, 300000),
-            "Total Fwd Packets": random.randint(100, 500),
-            "Flow Bytes/s": random.uniform(100000, 1000000),
-            "Fwd Packet Length Mean": random.uniform(1200, 1500),
-            "Average Packet Size": random.uniform(1000, 1500),
-            "Init_Win_bytes_forward": random.randint(50000, 65535),
+            "Destination Port":            random.choice([443, 8443, 4444, 9001]),
+            "Flow Duration":               flow_dur,
+            "Total Fwd Packets":           fwd_pkts,
+            "Total Length of Fwd Packets": fwd_pkts * pkt_size,
+            "Fwd Packet Length Mean":      pkt_size,
+            "Fwd Packet Length Max":       1500,
+            "Fwd Packet Length Min":       pkt_size - 100,
+            "Fwd Packet Length Std":       random.uniform(5, 50),
+            "Flow Bytes/s":                random.uniform(200000, 2000000),
+            "Flow Packets/s":              random.uniform(50, 500),
+            "Fwd Packets/s":              fwd_pkts / (flow_dur / 1e6 + 1e-9),
+            "Min Packet Length":           pkt_size - 150,
+            "Max Packet Length":           1500,
+            "Packet Length Mean":          pkt_size,
+            "Packet Length Std":           random.uniform(5, 50),
+            "Packet Length Variance":      random.uniform(25, 2500),
+            "Average Packet Size":         pkt_size,
+            "Subflow Fwd Bytes":           fwd_pkts * pkt_size,
+            "Init_Win_bytes_forward":      random.randint(50000, 65535),
+            "Init_Win_bytes_backward":     random.randint(8192, 32768),
+            "act_data_pkt_fwd":            fwd_pkts,
+            "PSH Flag Count":              random.randint(5, 30),
+            "ACK Flag Count":              random.randint(100, 500),
+            "Idle Mean":                   0,
+            "Idle Max":                    0,
+            "Idle Min":                    0,
         })
     elif attack_type == "port_scan":
+        flow_dur = random.uniform(1, 200)
         base.update({
-            "Flow Duration": random.uniform(1, 50),
-            "Total Fwd Packets": random.randint(1, 3),
-            "Total Backward Packets": 0,
-            "SYN Flag Count": random.randint(1, 5),
-            "RST Flag Count": random.randint(0, 3),
-            "Flow Packets/s": random.uniform(1000, 50000),
-            "Packet Length Variance": 0,
-            "Average Packet Size": random.uniform(40, 60),
+            "Destination Port":            random.randint(1, 65535),
+            "Flow Duration":               flow_dur,
+            "Total Fwd Packets":           random.randint(1, 3),
+            "Total Length of Fwd Packets": random.uniform(40, 120),
+            "Fwd Packet Length Mean":      random.uniform(40, 60),
+            "Fwd Packet Length Max":       66,
+            "Fwd Packet Length Min":       40,
+            "Fwd Packet Length Std":       0,
+            "Bwd Packet Length Mean":      0,
+            "Bwd Packet Length Max":       0,
+            "Bwd Packet Length Min":       0,
+            "Bwd Packet Length Std":       0,
+            "Flow Bytes/s":                random.uniform(50000, 500000),
+            "Flow Packets/s":              random.uniform(5000, 100000),
+            "Fwd Packets/s":              random.uniform(5000, 100000),
+            "Bwd Packets/s":              0,
+            "Min Packet Length":           40,
+            "Max Packet Length":           66,
+            "Packet Length Mean":          50,
+            "Packet Length Std":           0,
+            "Packet Length Variance":      0,
+            "Average Packet Size":         50,
+            "Subflow Fwd Bytes":           random.uniform(40, 120),
+            "FIN Flag Count":              0,
+            "PSH Flag Count":              0,
+            "ACK Flag Count":              0,
+            "Init_Win_bytes_forward":      random.randint(1024, 8192),
+            "Init_Win_bytes_backward":     0,
+            "act_data_pkt_fwd":            1,
+            "Idle Mean":                   0,
+            "Idle Max":                    0,
+            "Idle Min":                    0,
+            "Active Mean":                 0,
+            "Active Max":                  0,
+            "Active Min":                  0,
         })
 
     return base
