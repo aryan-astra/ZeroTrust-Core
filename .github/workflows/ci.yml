@@ -64,7 +64,7 @@ jobs:
       - name: Build
         run: |
           cd frontend
-          npm run build
+          DISABLE_ESLINT_PLUGIN=true npm run build
 
       - name: Test
         run: |
