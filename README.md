@@ -230,10 +230,10 @@ anomaly_detected = True  if  prediction == −1  OR  hybrid_score > 0.5
 
 | Population | Mean Hybrid Score | Detection Rate | FPR |
 |---|---|---|---|
-| Normal traffic | 0.006 | — | 0.15% |
-| Attack traffic | 0.996 | 100% | — |
+| Normal traffic | 0.13 | — | 0.15% |
+| Attack traffic | 0.77 | 100% | — |
 
-The separation between normal (μ=0.006) and attack (μ=0.996) populations is nearly **three orders of magnitude**, indicating strong discriminative power.
+The separation between normal (μ=0.13) and attack (μ=0.77) populations provides strong discriminative power with a clear decision boundary at 0.5.
 
 ---
 
@@ -381,22 +381,23 @@ open http://localhost:3000
 ### Local Development
 
 ```bash
-# Backend
+# Backend (from project root)
+cd X:\AMD-slingshot\ZeroTrust
+python -m venv .venv && .venv\Scripts\Activate.ps1
+pip install -r backend/requirements.txt
+python backend/train_all.py        # One-time model training
 cd backend
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-python train_all.py    # One-time model training
-python main.py
+python start_server.py
 
 # Frontend (separate terminal)
 cd frontend
-npm install && npm start
+npm install --legacy-peer-deps && npm start
 ```
 
 ### Simulation & Benchmarks
 
 ```bash
-python simulate.py all              # Full 6-scenario attack demo
+python simulate.py all              # Full 5-scenario attack demo
 python simulate.py apt              # APT kill chain campaign
 python benchmark.py --output benchmark_results
 pytest tests/ -v                    # 31 tests
