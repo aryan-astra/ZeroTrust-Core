@@ -1,0 +1,39 @@
+{
+  "baseline": {
+    "model": "TF-IDF + LogisticRegression",
+    "accuracy": 0.9797,
+    "roc_auc": 0.998,
+    "pr_auc": 0.998,
+    "f1": 0.9805,
+    "train_time_s": 171.053,
+    "inference_time_s": 0.0572
+  },
+  "enhanced": {
+    "model": "TF-IDF + Structured Features + LogisticRegression",
+    "accuracy": 0.9793,
+    "roc_auc": 0.9981,
+    "pr_auc": 0.9981,
+    "f1": 0.9801,
+    "train_time_s": 78.446,
+    "inference_time_s": 0.0549,
+    "structured_features": [
+      "url_count",
+      "has_ip_url",
+      "suspicious_tld",
+      "urgency_count",
+      "urgency_ratio",
+      "has_html_form",
+      "has_html_link",
+      "char_entropy",
+      "word_count",
+      "exclamation_count",
+      "question_count",
+      "caps_ratio"
+    ]
+  },
+  "transformer_roadmap": {
+    "planned_model": "DistilBERT",
+    "status": "planned",
+    "expected_improvement": "2-5% accuracy on adversarial phishing"
+  }
+}

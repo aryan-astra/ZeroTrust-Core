@@ -1,0 +1,27 @@
+{
+  "isolation_forest": {
+    "model": "IsolationForest",
+    "contamination": 0.01,
+    "n_estimators": 200,
+    "roc_auc": 0.8218,
+    "pr_auc": 0.693,
+    "f1_anomaly": 0.2882,
+    "train_time_s": 3.385,
+    "inference_time_s": 1.1316,
+    "threshold_p95": 0.0075
+  },
+  "supervised_classifier": {
+    "model": "RandomForestClassifier",
+    "n_estimators": 200,
+    "accuracy": 0.998,
+    "roc_auc": 0.9999,
+    "pr_auc": 0.9998,
+    "f1": 0.9966,
+    "train_time_s": 27.975,
+    "inference_time_s": 0.7354
+  },
+  "hybrid_weights": {
+    "isolation_forest": 0.4,
+    "supervised": 0.6
+  }
+}

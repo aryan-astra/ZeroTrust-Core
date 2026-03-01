@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+*.pkl
+*.joblib
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/build/
+
+# Datasets (large files)
+Datasets/
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Benchmark results (regenerable)
+backend/benchmark_results/
+
+# Processed data (regenerable)
+backend/data/processed/
+backend/backend/
+
+# Misc
+*.log
+*.tmp

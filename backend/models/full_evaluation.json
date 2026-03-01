@@ -1,0 +1,69 @@
+{
+  "network": {
+    "supervised_rf": {
+      "accuracy": 0.9991,
+      "precision": 0.9984,
+      "recall": 0.9987,
+      "f1": 0.9985,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "inference_ms_50k": 1822.2
+    },
+    "isolation_forest": {
+      "roc_auc": 0.821,
+      "anomaly_rate": 0.0587,
+      "precision_at_threshold": 0.8757,
+      "recall_at_threshold": 0.1696,
+      "inference_ms_50k": 2534.7
+    },
+    "hybrid": {
+      "accuracy": 0.9989,
+      "precision": 0.9987,
+      "recall": 0.9976,
+      "f1": 0.9982,
+      "roc_auc": 0.9999
+    },
+    "realworld_inference": {
+      "attack_detection_rate_50": 1.0,
+      "attack_detection_rate_30": 1.0,
+      "attack_mean_probability": 0.9964,
+      "false_positive_rate_50": 0.0015,
+      "false_positive_rate_30": 0.006,
+      "normal_mean_probability": 0.0061
+    }
+  },
+  "phishing": {
+    "baseline": {
+      "accuracy": 0.9797,
+      "precision": 0.978,
+      "recall": 0.9831,
+      "f1": 0.9805,
+      "roc_auc": 0.998,
+      "pr_auc": 0.998,
+      "inference_ms_10k": 4338.6
+    },
+    "enhanced": {
+      "accuracy": 0.9793,
+      "precision": 0.9778,
+      "recall": 0.9825,
+      "f1": 0.9801,
+      "roc_auc": 0.9981,
+      "pr_auc": 0.9981,
+      "inference_ms_10k": 33885.3,
+      "structured_features": [
+        "url_count",
+        "has_ip_url",
+        "suspicious_tld",
+        "urgency_count",
+        "urgency_ratio",
+        "has_html_form",
+        "has_html_link",
+        "char_entropy",
+        "word_count",
+        "exclamation_count",
+        "question_count",
+        "caps_ratio"
+      ]
+    }
+  }
+}
